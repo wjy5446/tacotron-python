@@ -16,7 +16,6 @@ class Attention(nn.Module):
 
     def forward(self, query, memory, memory_mask):
         """
-
         :param query: (batch_size, frame_length // r, input_size)
         :param memory: (batch_size, encoder_length, embed_size)
         :param memory_mask:
