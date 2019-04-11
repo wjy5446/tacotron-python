@@ -131,7 +131,7 @@ class HighwayNet(nn.Module):
 # Decoder Module
 ###########
 
-def binaryMask(x, length, mask_dim=1):
+def binaryMask(x, length):
     '''
 
     :param x: (batch_size, seq_length, dim)
@@ -140,69 +140,84 @@ def binaryMask(x, length, mask_dim=1):
     :return:
     '''
 
-    batch_size, seq_length, dim = x.size()
-    m = 0
+    batch_size, seq_len, dim = x.size()
+    mask_batch = []
     for b in range(batch_size):
-        mb = []
-        true_len = length[b]
+        mask = []
+        len_text = length[b]
 
-        for l in range(seq_length):
-            if l < true_len:
-                mb.append(np.ones((dim, )))
+        for l in range(seq_len):
+            if l < len_text:
+                mask.append(np.ones((dim, )))
             else:
-                mb.append(np.zeros((dim, )))
-        m.append(mb)
-    m = np.asarray(m)
-    m = torch.from_numpy(m).to(x.device).type(x.dtype)
+                mask.append(np.zeros((dim, )))
+        mask_batch.append(mask)
+    mask_batch = np.asarray(mask_batch)
+    mask_batch = torch.from_numpy(mask_batch).to(x.device).type(x.dtype)
 
-    return m
+    return mask_batch
 
 
 class AttentionRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, text_embed_size):
+    def __init__(self, input_size, hidden_size):
         super(AttentionRNN, self).__init__()
         self.gru = nn.GRU(input_size=input_size,
                           hidden_size=hidden_size,
                           batch_first=True)
-        self.text_embed_size = text_embed_size
         self.attention = Attention(query_size=hidden_size,
-                                   context_size=text_embed_size)
+                                   context_size=hidden_size)
 
-    def forward(self, input, memory, text_length):
-        frame_len = input.size(1)
+    def forward(self, input, memory, li_text_len):
+        '''
+
+        :param input: (batch_size, audio_len, audio_dim)
+        :param memory: (batch_size, text_len, hidden_dim)
+        :param li_text_len: text_len list in batch
+        :return: context + hidden (batch_size, audio_len, hidden_dim * 2)
+        '''
+        audio_len = input.size(1)
+        hidden_size = memory.size(2)
 
         self.gru.flatten_parameters()
 
-        hidden, state = self.gru(input)
+        output, hidden = self.gru(input) # output (batch_size, audio_len, hidden_dim), hidden (1, batch_size, hidden_dim)
 
-        mask_attention = self.makeAttnMask(memory, text_length, frame_len)
-        align = self.attention(query=hidden, memory=memory, memory_mask=mask_attention)
-        align_tiled = align.unsqueeze(3).repeat(1, 1, 1, self.text_embed_size)
-        memory_tiled = memory.unsqueeze(1).repeat(1, frame_len, 1, 1)
-        context = torch.sum(align_tiled * memory_tiled, dim=2)
-        out = torch.cat([context, hidden], dim=2)
+        mask_attention = self.makeAttnMask(memory, li_text_len, audio_len) # mask (batch_size, audio_len, text_len)
 
-        return out, align, state
+        align = self.attention(query=output, memory=memory, memory_mask=mask_attention) # align (batch_size, audio_len, text_len)
+        align_tiled = align.unsqueeze(3).repeat(1, 1, 1, hidden_size) # (batch_size, audio_len, text_len, hidden_dim)
+        memory_tiled = memory.unsqueeze(1).repeat(1, audio_len, 1, 1) # (batch_size, audio_len, text_len, hidden_dim)
+        context = torch.sum(align_tiled * memory_tiled, dim=2) # (batch_size, audio_len, hidden_dim)
+        output = torch.cat([context, output], dim=2) # (batch_size, audio_len, hidden_dim * 2)
 
-    def makeAttnMask(self, memory, encoder_length, frame_len):
+        return output, align, hidden
+
+    def makeAttnMask(self, memory, li_text_len, audio_len):
+        '''
+        :param memory: (batch_size, text_len, hidden_dim)
+        :param text_length: text_len list in batch
+        :param audio_len:
+        :return: Attention Mask (batch_size, audio_len, text_len)
+        '''
+
         batch_size = memory.size(0)
-        seq_len = memory.size(1)
-        m = []
+        text_len = memory.size(1)
+        mask_batch = []
 
         for b in range(batch_size):
-            mb = []
-            true_len = encoder_length[b]
-            for l in range(seq_len):
-                if l < true_len:
-                    mb.append(np.zeros((frame_len, ), dtype=np.int32))
+            mask = []
+            text_len = li_text_len[b]
+            for l in range(text_len):
+                if l < text_len:
+                    mask.append(np.zeros((audio_len), dtype=np.int32))
                 else:
-                    mb.append(np.ones((frame_len, ), dtype=np.int32))
-            m.append(mb)
+                    mask.append(np.ones((audio_len), dtype=np.int32))
+            mask_batch.append(mask)
 
-        m = np.swapaxes(np.asarray(m), 1, 2) # (batch_size, frame_len, seq_len)
-        m = torch.from_numpy(m).type(torch.ByteTensor).to(memory.device)
+        mask_batch = np.swapaxes(np.asarray(mask_batch), 1, 2) # (batch_size, audio_len, text_len)
+        mask_batch = torch.from_numpy(mask_batch).type(torch.ByteTensor).to(memory.device)
 
-        return m
+        return mask_batch
 
 class DecoderRNN(nn.Module):
     def __init__(self, input_size, output_size, r=5):

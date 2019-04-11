@@ -9,7 +9,7 @@ from utils.text import *
 from utils.audio import *
 
 class TTS_Dataset(Dataset):
-    def __init__(self, root, batch_size=32):
+    def __init__(self, root, batch_size=4):
         self.root = root
         self.batch_size = batch_size
 
@@ -22,7 +22,6 @@ class TTS_Dataset(Dataset):
         self.sort()
 
         item = self.make_data(self.waves[1], self.texts[1])
-        print(item)
 
     def __len__(self):
         return len(self.texts)
@@ -34,7 +33,8 @@ class TTS_Dataset(Dataset):
             idx_batch = range(self.n_data - self.batch_size, self.n_data)
 
         li_batch = [self.make_data(self.waves[j], self.texts[j]) for j in idx_batch]
-        item = make_data
+        item = make_data_batch(li_batch)
+        print(item)
 
         return item
 
@@ -76,8 +76,48 @@ class TTS_Dataset(Dataset):
         return {'text': text, 'mel': mel, 'mag': mag}
 
 def make_data_batch(li_batch):
+    text = [sent2idx(batch['text']) for batch in li_batch]
+    mel = [batch['mel'] for batch in li_batch]
+    mag = [batch['mag'] for batch in li_batch]
+
+    max_text_len = max([len(x) for x in text])
+    max_audio_len = max([x.shape[0] for x in mel])
+
+    remain_audio = max_audio_len % 3
+    max_text_len += 3 - remain_audio
+
+    li_text_len = []
+    li_audio_len = []
+
+    for i, t in enumerate(text):
+        text_len = len(t)
+        len_padding = max_text_len - text_len
+        padding = sent2idx(['_' for _ in range(len_padding)])
+        text[i] += padding
+        li_text_len.append(text_len)
+
+    for i, m in enumerate(mel):
+        mel_len = m.shape[0]
+        len_padding = max_audio_len - mel_len
+        padding = np.zeros([len_padding, m.shape[1]])
+        mel[i] = np.concatenate([m, padding], axis=0)
+        li_audio_len.append(mel_len)
+
+    for i, m in enumerate(mag):
+        mag_len = m.shape[0]
+        len_padding = max_audio_len - mag_len
+        padding = np.zeros([len_padding, m.shape[1]])
+        mag[i] = np.concatenate([m, padding], axis=0)
+
+    return {'text': torch.LongTensor(text),
+            'mel': torch.Tensor(mel),
+            'mag': torch.Tensor(mag),
+            'text_len': torch.LongTensor(li_text_len),
+            'mel_len': torch.LongTensor(li_audio_len)}
+
 
 
 
 if __name__ == '__main__':
     dataset = TTS_Dataset('data')
+    dataset.__getitem__(0)
