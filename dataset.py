@@ -14,14 +14,18 @@ class TTS_Dataset(Dataset):
         self.batch_size = batch_size
 
         li_wave, li_text = self.load_info(root)
+        print('[INFO] Load data from {}'.format(root))
+
         self.n_data = len(li_wave)
         self.waves = li_wave
         self.texts = li_text
+
         self.texts = self.preprocess_text(self.texts)
+        print('[INFO] Preprocess the text (text -> index)')
 
         self.sort()
-
-        item = self.make_data(self.waves[1], self.texts[1])
+        print('[INFO] Sort the data by length of sentence')
+        print('[INFO] Data size : {}'.format(len(self.texts)))
 
     def __len__(self):
         return len(self.texts)
@@ -34,7 +38,6 @@ class TTS_Dataset(Dataset):
 
         li_batch = [self.make_data(self.waves[j], self.texts[j]) for j in idx_batch]
         item = make_data_batch(li_batch)
-        print(item)
 
         return item
 
@@ -115,9 +118,11 @@ def make_data_batch(li_batch):
             'text_len': torch.LongTensor(li_text_len),
             'mel_len': torch.LongTensor(li_audio_len)}
 
-
-
-
 if __name__ == '__main__':
     dataset = TTS_Dataset('data')
-    dataset.__getitem__(0)
+    info = dataset.__getitem__(0)
+    print('text : ', info['text'].size(), 'mel : ', info['mel'].size(), 'mag : ', info['mag'].size())
+    print('text_len : ', info['text_len'], 'mel_len : ', info['mel_len'])
+
+
+
