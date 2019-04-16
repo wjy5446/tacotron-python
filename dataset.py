@@ -74,7 +74,7 @@ class TTS_Dataset(Dataset):
     def make_data(self, wave, text):
         path_wave = os.path.join(self.root, wave)
         wav, _ = load_audio(path_wave, sample_rate=22050)
-        mel, mag = get_spectrogram(wav, sampling_rate=22050)
+        mag, mel = get_spectrogram(wav, sampling_rate=22050)
 
         return {'text': text, 'mel': mel, 'mag': mag}
 
