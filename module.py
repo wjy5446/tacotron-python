@@ -12,7 +12,7 @@ from utils.text import *
 ###########
 
 class CBHG(nn.Module):
-    def __init__(self, K, dim_input, dim_hidden):
+    def __init__(self, K, dim_input, dim_hidden, dim_proj_hiddens):
         super(CBHG, self).__init__()
 
         ## conv1d bank
@@ -21,7 +21,7 @@ class CBHG(nn.Module):
         for k in range(1, K+1):
             layers_conv1d_bank += [
                 nn.Sequential(
-                    nn.Conv1d(dim_input, dim_hidden, kernel_size=k//2),
+                    nn.Conv1d(dim_input, dim_hidden, kernel_size=k, padding=k//2),
                     nn.ReLU(),
                     nn.BatchNorm1d(dim_hidden, momentum=0.99, eps=1e-3)
                 )
@@ -34,19 +34,20 @@ class CBHG(nn.Module):
 
         ## conv1d_projection
         self.conv1d_projection = nn.Sequential(
-            nn.Conv1d(K * dim_hidden, dim_hidden, kernel_size=3, stride=1, padding=1),
+            nn.Conv1d(K * dim_hidden, dim_proj_hiddens[0], kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            nn.BatchNorm1d(dim_hidden, momentum=0.99, eps=1e-3),
-            nn.Conv1d(dim_hidden, dim_hidden, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(dim_proj_hiddens[0], momentum=0.99, eps=1e-3),
+            nn.Conv1d(dim_proj_hiddens[0], dim_proj_hiddens[1], kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            nn.BatchNorm1d(dim_hidden, momentum=0.99, eps=1e-3),
+            nn.BatchNorm1d(dim_proj_hiddens[1], momentum=0.99, eps=1e-3),
         )
+        self.fc_projection = nn.Linear(dim_proj_hiddens[1], dim_hidden)
 
         ## highway network
         layers_highway = []
         for k in range(4):
-            layers_highway += [HighwayNet(input_size=dim_hidden,
-                                          output_size=dim_hidden)]
+            layers_highway += [HighwayNet(dim_input=dim_hidden,
+                                          dim_output=dim_hidden)]
         self.highway = nn.Sequential(*layers_highway)
 
         ## GRU
@@ -63,7 +64,6 @@ class CBHG(nn.Module):
         '''
         x = input.transpose(1, 2) # (batch_size, dim_input, text_size)
         seq_time = x.size(-1)
-
         ## conv1d_banks
         y = torch.cat([conv1d(x)[:,:,:seq_time] for conv1d in self.conv1d_bank], dim=1) # (batch_size, K * dim_hidden, text_size)
 
@@ -71,12 +71,12 @@ class CBHG(nn.Module):
         y = self.max1d(y)[:,:,:seq_time] # (batch_size, K * dim_hidden, text_size)
 
         ## conv1d projections
-        y = self.conv1d_projections(y)  # (batch_size, dim_hidden, text_size)
+        y = self.conv1d_projection(y)  # (batch_size, dim_hidden, text_size)
         y = y + x
-
         y = y.transpose(1, 2) # (batch_size, text_size, dim_hidden)
 
         ## highway
+        y = self.fc_projection(y)
         y = self.highway(y)  # (batch_size, text_size, dim_hidden)
 
         ## gru
@@ -157,14 +157,14 @@ def binaryMask(x, length):
     for b in range(batch_size):
         mask = []
         len = length[b]
-
-        for l in range(len):
+        for l in range(seq_len):
             if l < len:
                 mask.append(np.ones((dim)))
             else:
                 mask.append(np.zeros((dim)))
-        mask_batch.append(mask)
-    mask_batch = np.asarray(mask_batch)
+        mask_batch.append(np.stack(mask))
+
+    mask_batch = np.stack(mask_batch)
     mask_batch = torch.from_numpy(mask_batch).to(x.device).type(x.dtype) # (batch_size, seq_len, dim)
 
     return mask_batch
@@ -173,13 +173,13 @@ def binaryMask(x, length):
 class AttentionRNN(nn.Module):
     def __init__(self, dim_input, dim_hidden):
         super(AttentionRNN, self).__init__()
-        self.gru = nn.GRU(dim_input=dim_input,
-                          dim_hidden=dim_hidden,
+        self.gru = nn.GRU(input_size=dim_input,
+                          hidden_size=dim_hidden,
                           batch_first=True)
-        self.attention = Attention(dim_query=dim_hidden,
-                                   dim_context=dim_hidden)
+        self.attention = Attention(query_size=dim_hidden,
+                                   context_size=dim_hidden)
 
-    def forward(self, input, memory, text_length, hidden_attn_rnn):
+    def forward(self, input, memory, text_length, hidden_attn_rnn=None):
         '''
 
         :param input: (batch_size, audio_len, dim_audio),
@@ -197,7 +197,7 @@ class AttentionRNN(nn.Module):
         self.gru.flatten_parameters()
 
         if is_train:
-            output, _ = self.gru(input)
+            output, hidden = self.gru(input)
         else:
             output, hidden = self.gru(input, hidden_attn_rnn)
         # output (batch_size, audio_len, dim_hidden)
@@ -224,13 +224,13 @@ class AttentionRNN(nn.Module):
         :return: Attention Mask (batch_size, audio_len, text_len)
         '''
 
-        batch_size = memory.size(0)
+        batch_size, length, _ = memory.size()
         mask_batch = []
 
         for b in range(batch_size):
             mask = []
             len = text_len[b]
-            for l in range(len):
+            for l in range(length):
                 if l < len:
                     mask.append(np.zeros((audio_len), dtype=np.int32))
                 else:
@@ -253,7 +253,7 @@ class DecoderRNN(nn.Module):
                            hidden_size=dim_input, batch_first=True)
         self.fc = nn.Linear(dim_input, r * dim_output)
 
-    def forward(self, input, hidden_dec_rnn):
+    def forward(self, input, hidden_dec_rnn=None):
         '''
 
         :param input: (batch_size, audio_len, dim_input)
@@ -264,17 +264,28 @@ class DecoderRNN(nn.Module):
         output : (batch_size, r * audio_len, dim_output)
         hidden : (2, batch_size, dim_input)
         '''
+        is_train = hidden_dec_rnn is None
         batch_size = input.size(0)
-        hidden_dec_rnn1 = hidden_dec_rnn[0, :, :] # (1, batch_size, dim_input)
-        hidden_dec_rnn2 = hidden_dec_rnn[1, :, :] # (1, batch_size, dim_input)
 
-        output1, hidden1 = self.gru1(input, hidden_dec_rnn1)
-        # output1 (batch_size, audio_len, dim_input)
-        # hidden1 (1, batch_size, dim_input)
+        if is_train:
+            output1, hidden1 = self.gru1(input)
+            # output1 (batch_size, audio_len, dim_input)
+            # hidden1 (1, batch_size, dim_input)
 
-        output2, hidden2 = self.gru2(input + output1, hidden_dec_rnn2)
-        # output2 (batch_size, audio_len, dim_input)
-        # hidden2 (1, batch_size, dim_input)
+            output2, hidden2 = self.gru2(input + output1)
+            # output2 (batch_size, audio_len, dim_input)
+            # hidden2 (1, batch_size, dim_input)
+        else:
+            hidden_dec_rnn1 = hidden_dec_rnn[0, :, :] # (1, batch_size, dim_input)
+            hidden_dec_rnn2 = hidden_dec_rnn[1, :, :] # (1, batch_size, dim_input)
+
+            output1, hidden1 = self.gru1(input, hidden_dec_rnn1)
+            # output1 (batch_size, 1, dim_input)
+            # hidden1 (1, batch_size, dim_input)
+
+            output2, hidden2 = self.gru2(input + output1, hidden_dec_rnn2)
+            # output2 (batch_size, 1, dim_input)
+            # hidden2 (1, batch_size, dim_input)
 
         output = self.fc(output1 + output2 + input) # output (batch_size, audio_len, r * dim_output)
         output = output.view(batch_size, -1, self.dim_output) # (batch_size, audio_len * r, dim_output)
