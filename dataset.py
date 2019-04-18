@@ -86,12 +86,14 @@ def make_data_batch(li_batch):
     max_text_len = max([len(x) for x in text])
     max_audio_len = max([x.shape[0] for x in mel])
 
-    remain_audio = max_audio_len % 3
-    max_text_len += 3 - remain_audio
+    # 3배수의 길이로 audio 생성
+    remain_audio = max_audio_len % 2
+    max_audio_len += 2 - remain_audio
 
     li_text_len = []
     li_audio_len = []
 
+    # 나머지 공간에 padding(-) 을 추가
     for i, t in enumerate(text):
         text_len = len(t)
         len_padding = max_text_len - text_len
@@ -99,6 +101,7 @@ def make_data_batch(li_batch):
         text[i] += padding
         li_text_len.append(text_len)
 
+    #  나머지 공간을 0으로 패딩
     for i, m in enumerate(mel):
         mel_len = m.shape[0]
         len_padding = max_audio_len - mel_len
@@ -106,6 +109,7 @@ def make_data_batch(li_batch):
         mel[i] = np.concatenate([m, padding], axis=0)
         li_audio_len.append(mel_len)
 
+    # 나머지 공간을 0으로 패딩
     for i, m in enumerate(mag):
         mag_len = m.shape[0]
         len_padding = max_audio_len - mag_len
