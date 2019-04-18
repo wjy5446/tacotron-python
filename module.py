@@ -191,8 +191,8 @@ class AttentionRNN(nn.Module):
         :return: context + hidden (batch_size, audio_len, hidden_dim * 2)
         '''
         is_train = hidden_attn_rnn is None
-        audio_len = input.size(1)
         dim_hidden = memory.size(2)
+        audio_len = input.size(1)
 
         self.gru.flatten_parameters()
 
@@ -207,7 +207,7 @@ class AttentionRNN(nn.Module):
 
         align = self.attention(query=output, memory=memory, memory_mask=mask_attention) # align (batch_size, audio_len, text_len)
         align_tiled = align.unsqueeze(3).repeat(1, 1, 1, dim_hidden) # (batch_size, audio_len, text_len, dim_hidden)
-        memory_tiled = memory.unsqueeze(1).repeat(1, audio_len, 1, 1) # (batch_size, audio_len, text_len, dim_hidden)
+        memory_tiled = memory.unsqueeze(1).repeat(1, input.size(1), 1, 1) # (batch_size, audio_len, text_len, dim_hidden)
         context = torch.sum(align_tiled * memory_tiled, dim=2) # (batch_size, audio_len, dim_hidden)
 
         output = torch.cat([context, output], dim=2) # (batch_size, audio_len, dim_hidden * 2)
@@ -220,9 +220,9 @@ class AttentionRNN(nn.Module):
         '''
         :param memory: (batch_size, text_len, dim_hidden)
         :param text_len: text_len list in batch (batch_size)
-        :param audio_len: audio_len list in batch (batch_size)
         :return: Attention Mask (batch_size, audio_len, text_len)
         '''
+
 
         batch_size, length, _ = memory.size()
         mask_batch = []
@@ -232,12 +232,16 @@ class AttentionRNN(nn.Module):
             len = text_len[b]
             for l in range(length):
                 if l < len:
-                    mask.append(np.zeros((audio_len), dtype=np.int32))
+                    mask.append(np.ones((audio_len,), dtype=np.int32))
                 else:
-                    mask.append(np.ones((audio_len), dtype=np.int32))
+                    mask.append(np.zeros((audio_len,), dtype=np.int32))
+
+            mask = np.stack(mask)
             mask_batch.append(mask)
 
-        mask_batch = np.swapaxes(np.asarray(mask_batch), 1, 2)
+        mask_batch = np.stack(mask_batch)
+
+        mask_batch = np.swapaxes(mask_batch, 1, 2)
         mask_batch = torch.from_numpy(mask_batch).type(torch.ByteTensor).to(memory.device) # (batch_size, audio_len, text_len)
 
         return mask_batch
