@@ -113,7 +113,9 @@ class Decoder(nn.Module):
         go_frame = torch.zeros((batch_size, 1, self.dim_mel))
 
         if self.is_training:
-            y = torch.cat([go_frame, audios[:,self.reduction_factor::self.reduction_factor,:].float()], dim=1)
+            mask = binaryMask(audios, audio_length)
+            y = mask * audios
+            y = torch.cat([go_frame, y[:,self.reduction_factor::self.reduction_factor,:].float()], dim=1)
             # (batch_size, audio_len // r, dim_mel)
             y = self.prenet(y) # (batch_size, audio_len // r, dim_embed // 2)
 
