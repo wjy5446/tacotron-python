@@ -22,7 +22,6 @@ class Attention(nn.Module):
         :return: align (batch_size, audio_len, text_len)
         """
 
-
         batch_size = memory.size(0)
         text_len = memory.size(1)
         embed_dim = memory.size(2)
@@ -44,7 +43,7 @@ class Attention(nn.Module):
 
         energy = torch.sum(v_tiled * info_matrix, dim=1)
         energy = energy.view(batch_size, audio_len, text_len) # (batch_size, audio_len, text_len)
-        energy = energy.float().masked_fill(memory_mask, float('-inf')).type_as(energy)
+        energy = energy.float().masked_fill(memory_mask==0, float('-inf')).type_as(energy)
 
         alignment = F.softmax(energy.float(), dim=2).type_as(energy)  # (batch_size, audio_len, text_len)
 
