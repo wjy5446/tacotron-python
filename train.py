@@ -1,6 +1,10 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
+import seaborn as sns
 
 from network import Tacotron
 from dataset import TTS_Dataset
@@ -34,14 +38,21 @@ def train():
             loss.backward()
             optimizer.step()
 
-            if (idx + 1) % 1000 == 0:
+            if ((epoch * total_batch) + idx) % 10 == 0:
                 print('Epoch [%d/%d], Iter [%d/%d], loss: %.4f'
                       % (epoch, epochs, idx + 1, total_batch, loss.item()))
 
-                print(align)
+                save_att_result('result', align[0].detach().numpy(), epoch, idx, loss.item())
 
-            break
+def save_att_result(path, align, epoch, iter, loss):
+    print(align.shape)
+    ax = sns.heatmap(align)
+    fig = ax.get_figure()
+    name_save = 'epoch-{}_iter-{}_loss-{}.png'.format(epoch, iter, loss)
+    print(fig)
+    #fig.savefig(os.path.join(path, name_save))
 
-#
+    print('[INFO] Save attention heatmap!!')
+
 if __name__ == "__main__":
     train()

@@ -55,7 +55,6 @@ class TTS_Dataset(Dataset):
     def preprocess_text(self, texts):
         texts_new = []
         for text in texts:
-            text = normalize(text)
             text = tokenize(text)
             texts_new.append(text)
 
@@ -86,7 +85,7 @@ def make_data_batch(li_batch):
     max_text_len = max([len(x) for x in text])
     max_audio_len = max([x.shape[0] for x in mel])
 
-    # 3배수의 길이로 audio 생성
+    # 2배수의 길이로 audio 생성
     remain_audio = max_audio_len % 2
     max_audio_len += 2 - remain_audio
 

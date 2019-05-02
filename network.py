@@ -32,10 +32,8 @@ class Tacotron(nn.Module):
 
         # encoder
         output_encoder = self.encoder(text, text_len) # (batch_size, text_len, dim_embed)
-
         # decoder
         output_mel, align = self.decoder(audio, output_encoder, text_len, audio_len) # (batch_size, r * audio_len, dim_mel)
-
         # postprecessing net
         output_mag = self.postprocessing(output_mel) # (batch_size, r * audio_len, dim_mag)
         return output_mel, output_mag, align
@@ -123,10 +121,8 @@ class Decoder(nn.Module):
             y, align, _ = self.attnRNN(y, memory, text_length)
             # output (batch_size, audio_len // r, dim_embed)
             # align (batch_size, audio_len // r, text_len)
-
             output, _ = self.decRNN(y)
             # output (batch_size, r * (audio_len), dim_embed)
-            # align (batch_size, audio_len, text_len)
         else:
             # eval mode
             y = go_frame
@@ -190,4 +186,3 @@ if __name__ == '__main__':
 
     model = Tacotron(dim_embed=256, dim_mel=80, dim_mag=1025, is_training=True)
     output_mel, output_mag = model(info['text'], info['mel'], info['text_len'], info['mel_len'])
-    print(output_mel.size(), output_mag.size())
